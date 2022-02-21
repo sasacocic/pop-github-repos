@@ -1,126 +1,158 @@
 import type { NextPage } from "next";
 import Head from "next/head";
-import Image from "next/image";
-import { useEffect, useState, VoidFunctionComponent } from "react";
-import styles from "../styles/Home.module.css";
+import React, { useEffect, useState } from "react";
 import { DateTime } from "luxon";
+import Navigation from "../components/Navigation";
+import Repo from "../components/Repo";
+import type { Repo as RepoType } from "../components/Repo";
+import { localStorageKey } from "../util/consts";
 
-// probs a better name
-const localStorageKey = "repos";
+const Home: NextPage = () => {
+  let [repos, setRepos] = useState<RepoType[]>([]);
+  let [page, setPage] = useState(1);
+  let [error, setError] = useState<string | null>(null);
+  let [update, setUpdate] = useState(false);
+  let [language, setLanguage] = useState("");
 
-type RepoEProps = {
-  stargazer_count: number;
-  name: string;
-};
+  let query = (created: string, page: number, langauge?: string) =>
+    `https://api.github.com/search/repositories?q=${encodeURIComponent(
+      `created:>=${created}${language ? ` language:${language}` : ""}`
+    )}&sort=stars&order=desc&page=${page}`;
 
-const RepoE: VoidFunctionComponent<RepoEProps> = ({
-  name,
-  stargazer_count,
-}) => {
-  const favorite = (name: string) => {
-    return function addFavorite(event: any) {
-      console.log(`saving ${name} as favorite`);
+  useEffect(() => {
+    let getRepos = async function (page: number) {
+      try {
+        let pastWeek = DateTime.now().minus({ week: 1 }).toISODate();
+        let res = await fetch(
+          query(pastWeek, page, language.length != 0 ? language : undefined)
+        );
+        if (res.ok) {
+          let bod = await res.json();
+          let rez = bod.items.map((e: any) => {
+            return {
+              stargazers_count: e.stargazers_count,
+              name: e.name,
+              description: e.description,
+              html_url: e.html_url,
+            };
+          });
+          setRepos(rez);
+        } else {
+          throw new Error("the response wasn't 200");
+        }
+      } catch (e) {
+        if (e instanceof Error) setError(e.message);
+      }
+    };
+    getRepos(page);
+  }, [page, update, language]);
+
+  let addFavorite =
+    (
+      name: string,
+      stargazers_count: number,
+      html_url: string,
+      description: string
+    ) =>
+    (event: React.MouseEvent) => {
+      console.debug(`saving ${name} as favorite`);
       if (!localStorage.getItem(localStorageKey)) {
-        localStorage.setItem(localStorageKey, JSON.stringify([{ name }]));
+        localStorage.setItem(
+          localStorageKey,
+          JSON.stringify([{ name, stargazers_count, html_url, description }])
+        );
       } else {
-        let storedItem = localStorage.getItem(localStorageKey); // it will alwasy be string...
+        let storedItem = localStorage.getItem(localStorageKey);
         if (typeof storedItem === "string") {
           let repos = JSON.parse(storedItem);
-          repos.push({ name });
+          repos.push({
+            stargazers_count,
+            html_url,
+            description,
+            name,
+          });
           localStorage.setItem(localStorageKey, JSON.stringify(repos));
         }
       }
+      setUpdate(!update);
     };
-  };
 
   return (
-    <div onClick={favorite(name)}>
-      <div>{name}</div>
-      <div>{stargazer_count}</div>
-    </div>
-  );
-};
-
-type Repo = {
-  stargazer_count: number;
-  name: string;
-};
-
-const FavoritedRepos: VoidFunctionComponent = () => {
-  let [favorites, setFavorites] = useState([]);
-
-  useEffect(function FavoritedReposEffect() {
-    console.log("effect runngin");
-    let favs = localStorage.getItem(localStorageKey);
-
-    console.log(`favs is`, favs);
-    if (typeof favs === "string") {
-      setFavorites(JSON.parse(favs));
-    }
-  }, []);
-
-  return (
-    <div>
-      {favorites.map(({ name }, i) => (
-        <div key={i}>{`name: ${name}`}</div>
-      ))}
-    </div>
-  );
-};
-
-const Home: NextPage = () => {
-  let [repos, setRepos] = useState<Repo[]>([]);
-
-  let query = (created: string) =>
-    `https://api.github.com/search/repositories?q=created:${created}&sort=stars&order=desc`;
-
-  useEffect(() => {
-    async function doEffect() {
-      let today = DateTime.now().minus({ week: 1 });
-
-      let pastWeek = today.toISODate();
-      let res = await fetch(query(pastWeek));
-      if (res.ok) {
-        let bod = await res.json();
-        console.log(bod);
-        // stargazers_count is the star count
-
-        let rez = bod.items.map((e: any) => {
-          return {
-            stargazer_count: e.stargazers_count,
-            name: e.name,
-          };
-        });
-
-        setRepos(rez);
-      } else {
-        console.error("there's an error");
-      }
-    }
-    doEffect();
-  }, []);
-
-  return (
-    <div>
+    <div className="bg-black">
       <Head>
-        <title>Create Next App</title>
-        <meta name="description" content="Generated by create next app" />
+        <title>new popular github repos</title>
+        <meta name="description" content="popular github repos" />
         <link rel="icon" href="/favicon.ico" />
       </Head>
 
-      <main className={"grid grid-cols-2"}>
-        <div>
-          {repos.map(({ stargazer_count, name }, i) => (
-            <RepoE key={i} name={name} stargazer_count={stargazer_count} />
-          ))}
-        </div>
-        <div>
-          <h3>favorites</h3>
-          <FavoritedRepos />
-        </div>
-      </main>
+      <Navigation>
+        {error ? (
+          <p className="text-center text-2xl text-red-500">{`${error} please reload the page`}</p>
+        ) : (
+          <>
+            <div className="space-y-4">
+              <h1 className="text-6xl text-center">
+                Popluar Github Repos last 7 days
+              </h1>
 
-      {/* <footer>footer</footer> */}
+              <select
+                className="bg-black"
+                onChange={(e) => setLanguage(e.target.value)}
+              >
+                <option value="">pick lang</option>
+                <option value="javascript">javascript</option>
+                <option value="typescript">typescript</option>
+                <option value="rust">Rust</option>
+                <option value="clojure">Clojure</option>
+                <option value="java">Java</option>
+              </select>
+
+              {repos.map(
+                ({ stargazers_count, name, description, html_url }, i) => (
+                  <Repo
+                    key={i}
+                    name={name}
+                    stargazers_count={stargazers_count}
+                    description={description}
+                    html_url={html_url}
+                    isFavorite={
+                      localStorage.getItem(localStorageKey) &&
+                      // @ts-ignore
+                      JSON.parse(localStorage.getItem(localStorageKey)).find(
+                        (e) => e.name === name
+                      )
+                    }
+                    addFavoriteEvent={addFavorite(
+                      name,
+                      stargazers_count,
+                      html_url,
+                      description
+                    )}
+                  />
+                )
+              )}
+            </div>
+            <div className="flex space-x-3 justify-center">
+              <button
+                className="border-2 border-white rounded p-8"
+                onClick={() => {
+                  setPage(page - 1 >= 1 ? page - 1 : 1);
+                }}
+              >
+                Prev
+              </button>
+              <button
+                className="border-2 border-white rounded p-8"
+                onClick={() => {
+                  setPage(page + 1 <= 34 ? page + 1 : 34);
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </>
+        )}
+      </Navigation>
     </div>
   );
 };
